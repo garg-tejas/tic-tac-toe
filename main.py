@@ -1,8 +1,130 @@
 #!/usr/bin/env python3
 import sys
+import argparse
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+from game import TicTacToe
+from rl_agent import QAgent, RandomAgent, MiniMaxAgent, DeepQAgent, train_agent
 from gui import TicTacToeGUI
 
+def parse_args():
+    parser = argparse.ArgumentParser(description='Tic Tac Toe with Reinforcement Learning')
+    parser.add_argument('--train', action='store_true', help='Train the agent')
+    parser.add_argument('--agent', type=str, default='deep', choices=['q', 'deep'], help='Agent type: q or deep')
+    parser.add_argument('--episodes', type=int, default=50000, help='Number of training episodes')
+    parser.add_argument('--opponent', type=str, default='random', choices=['random', 'minimax', 'self'], 
+                        help='Opponent type: random, minimax, or self-play')
+    parser.add_argument('--play', action='store_true', help='Play against the trained agent')
+    parser.add_argument('--visualize', action='store_true', help='Visualize training metrics')
+    parser.add_argument('--save-path', type=str, default=None, help='Path to save the trained agent')
+    parser.add_argument('--load-path', type=str, default=None, help='Path to load the agent from')
+    return parser.parse_args()
+
+def create_agent(agent_type, player=-1, load_path=None):
+    if agent_type == 'q':
+        agent = QAgent(player=player)
+    else:  # deep
+        agent = DeepQAgent(player=player)
+        
+    if load_path:
+        agent.load(load_path)
+        print(f"Agent loaded from {load_path}")
+    
+    return agent
+
+def create_opponent(opponent_type, player=1):
+    if opponent_type == 'random':
+        return RandomAgent(player=player)
+    elif opponent_type == 'minimax':
+        return MiniMaxAgent(player=player)
+    else:
+        return None  # For self-play
+
+def visualize_metrics(metrics):
+    """Visualize training metrics"""
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 15))
+    
+    # Plot win rates
+    win_rates = metrics['win_rates']
+    x_vals = np.arange(len(win_rates)) * 100
+    ax1.plot(x_vals, win_rates)
+    ax1.set_title('Win Rate During Training')
+    ax1.set_xlabel('Episode')
+    ax1.set_ylabel('Win Rate')
+    
+    # Plot rewards
+    rewards = metrics['rewards']
+    window_size = min(100, len(rewards))
+    if window_size > 0:
+        smoothed_rewards = np.convolve(rewards, np.ones(window_size)/window_size, mode='valid')
+        ax2.plot(smoothed_rewards)
+        ax2.set_title('Smoothed Rewards')
+        ax2.set_xlabel('Episode')
+        ax2.set_ylabel('Reward')
+    
+    # Plot episode lengths
+    lengths = metrics['episode_lengths']
+    window_size = min(100, len(lengths))
+    if window_size > 0:
+        smoothed_lengths = np.convolve(lengths, np.ones(window_size)/window_size, mode='valid')
+        ax3.plot(smoothed_lengths)
+        ax3.set_title('Average Game Length')
+        ax3.set_xlabel('Episode')
+        ax3.set_ylabel('Moves')
+    
+    plt.tight_layout()
+    plt.savefig('training_metrics.png')
+    plt.show()
+
+def train_and_save(agent_type, opponent_type, num_episodes, save_path=None):
+    """Train the agent and save the model"""
+    env = TicTacToe()
+    
+    # Create agent
+    agent = create_agent(agent_type)
+    
+    # Create opponent or use self-play
+    self_play = opponent_type == 'self'
+    if self_play:
+        opponent = None
+    else:
+        opponent = create_opponent(opponent_type)
+    
+    # Train the agent
+    print(f"Training {agent_type} agent against {opponent_type} for {num_episodes} episodes...")
+    agent, metrics = train_agent(env, agent, opponent, num_episodes=num_episodes, self_play=self_play)
+    
+    # Save the agent
+    if save_path is None:
+        if agent_type == 'q':
+            save_path = 'q_agent'
+        else:
+            save_path = 'deep_q_agent'
+    
+    agent.save(save_path)
+    print(f"Agent saved to {save_path}")
+    
+    return agent, metrics
+
+def main():
+    args = parse_args()
+    
+    if args.train:
+        agent, metrics = train_and_save(args.agent, args.opponent, args.episodes, args.save_path)
+        
+        if args.visualize:
+            visualize_metrics(metrics)
+    
+    if args.play or not args.train:
+        # Load the trained agent if not just trained
+        if not args.train:
+            load_path = args.load_path or ('q_agent' if args.agent == 'q' else 'deep_q_agent')
+            agent = create_agent(args.agent, load_path=load_path)
+        
+        # Start the GUI application
+        gui = TicTacToeGUI(agent=agent)
+        gui.run()
+
 if __name__ == "__main__":
-    # Start the GUI application
-    gui = TicTacToeGUI()
-    gui.run()
+    main()

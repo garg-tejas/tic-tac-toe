@@ -4,7 +4,7 @@ import numpy as np
 import sys
 import time
 from game import TicTacToe
-from rl_agent import QAgent, RandomAgent, MiniMaxAgent, train_agent
+from rl_agent import QAgent, RandomAgent, MiniMaxAgent, DeepQAgent, train_agent
 
 # Initialize pygame
 pygame.init()
@@ -169,14 +169,22 @@ class RadioButton:
 
 
 class TicTacToeGUI:
-    def __init__(self):
+    def __init__(self, agent=None):
         self.game = TicTacToe()
-        self.rl_agent = QAgent(player=1)  # RL agent plays X
+        
+        # Allow providing a pre-initialized agent (e.g., from training)
+        if agent:
+            self.rl_agent = agent
+        else:
+            # Try loading the deep Q agent first, fall back to regular Q agent if not found
+            self.rl_agent = DeepQAgent(player=1)
+            if not self.rl_agent.load('deep_q_agent'):
+                print("Deep Q agent not found, trying regular Q agent")
+                self.rl_agent = QAgent(player=1)
+                self.rl_agent.load()
+                
         self.random_agent = RandomAgent(player=-1)  # Random agent plays O
         self.minimax_agent = MiniMaxAgent(player=-1)  # MiniMax agent plays O
-        
-        # Try to load a pre-trained agent
-        self.rl_agent.load()
         
         self.opponent = self.random_agent  # Default opponent
         self.training = False
