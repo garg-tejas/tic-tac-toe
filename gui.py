@@ -1,3 +1,4 @@
+import random
 import pygame
 import numpy as np
 import sys
@@ -23,35 +24,60 @@ DARK_BLUE = (0, 0, 150)
 DARK_RED = (150, 0, 0)
 GOLD = (255, 215, 0)
 
-# Screen dimensions
-SCREEN_WIDTH = 900
-SCREEN_HEIGHT = 600
+# Base screen dimensions - will be adjusted when resizing
+BASE_SCREEN_WIDTH = 1200
+BASE_SCREEN_HEIGHT = 800
 
-# Board dimensions
-BOARD_SIZE = 360
-CELL_SIZE = BOARD_SIZE // 3
-BOARD_X = 50
-BOARD_Y = 120
-
-# Button dimensions
-BUTTON_WIDTH = 200
-BUTTON_HEIGHT = 50
-BUTTON_MARGIN = 20
-
-# Training visualization settings
-TRAIN_HISTORY_WIDTH = 400
-TRAIN_HISTORY_HEIGHT = 200
-TRAIN_GRAPH_X = BOARD_X + BOARD_SIZE + 40
-TRAIN_GRAPH_Y = BOARD_Y
-MAX_HISTORY_POINTS = 100
-
-# Initialize the screen
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+# Initialize the screen with resizable flag
+screen = pygame.display.set_mode((BASE_SCREEN_WIDTH, BASE_SCREEN_HEIGHT), pygame.RESIZABLE)
 pygame.display.set_caption("Tic Tac Toe - RL Agent")
-font = pygame.font.SysFont("Arial", 24)
-small_font = pygame.font.SysFont("Arial", 18)
-large_font = pygame.font.SysFont("Arial", 36)
-title_font = pygame.font.SysFont("Arial", 48, bold=True)
+
+# Function to calculate responsive layout dimensions
+def calculate_layout(width, height):
+    layout = {}
+    
+    # Set the board size based on the smaller dimension with padding
+    layout['board_size'] = min(width, height) * 0.5
+    layout['cell_size'] = layout['board_size'] // 3
+    
+    # Position the board centered on the left side of the screen
+    layout['board_x'] = width * 0.1
+    layout['board_y'] = (height - layout['board_size']) // 2
+    
+    # Button dimensions - scale with screen size
+    layout['button_width'] = width * 0.15
+    layout['button_height'] = height * 0.06
+    layout['button_margin'] = width * 0.02
+    
+    # Training visualization settings
+    layout['train_history_width'] = width * 0.35
+    layout['train_history_height'] = height * 0.3
+    layout['train_graph_x'] = layout['board_x'] + layout['board_size'] + width * 0.05
+    layout['train_graph_y'] = layout['board_y']
+    
+    # Make column 2 (controls) at fixed position relative to board
+    layout['controls_x'] = layout['train_graph_x']
+    layout['controls_y'] = layout['train_graph_y'] + layout['train_history_height'] + height * 0.05
+    
+    # Font sizes scaled to screen height
+    layout['small_font_size'] = int(height * 0.022)
+    layout['normal_font_size'] = int(height * 0.03)
+    layout['large_font_size'] = int(height * 0.045)
+    layout['title_font_size'] = int(height * 0.06)
+    
+    return layout
+
+# Global layout dictionary
+layout = calculate_layout(BASE_SCREEN_WIDTH, BASE_SCREEN_HEIGHT)
+
+# Fonts - will be updated when screen is resized
+font = pygame.font.SysFont("Arial", layout['normal_font_size'])
+small_font = pygame.font.SysFont("Arial", layout['small_font_size'])
+large_font = pygame.font.SysFont("Arial", layout['large_font_size'])
+title_font = pygame.font.SysFont("Arial", layout['title_font_size'], bold=True)
+
+# Maximum number of history points to display
+MAX_HISTORY_POINTS = 100
 
 
 class Button:
@@ -62,13 +88,25 @@ class Button:
         self.hover_color = hover_color
         self.text_color = text_color
         self.hovered = False
+        # Store original values for responsive resizing
+        self.original_x = x
+        self.original_y = y
+        self.original_width = width
+        self.original_height = height
     
-    def draw(self, surface):
+    def update_position(self, x, y, width, height):
+        """Update button position and size when screen is resized"""
+        self.rect = pygame.Rect(x, y, width, height)
+    
+    def draw(self, surface, current_font=None):
+        if current_font is None:
+            current_font = font
+            
         color = self.hover_color if self.hovered else self.color
         pygame.draw.rect(surface, color, self.rect, border_radius=10)
         pygame.draw.rect(surface, BLACK, self.rect, 2, border_radius=10)
         
-        text_surf = font.render(self.text, True, self.text_color)
+        text_surf = current_font.render(self.text, True, self.text_color)
         text_rect = text_surf.get_rect(center=self.rect.center)
         surface.blit(text_surf, text_rect)
     
@@ -88,21 +126,38 @@ class RadioButton:
         self.text = text
         self.selected = selected
         self.group = group
+        # Store original values for responsive resizing
+        self.original_x = x
+        self.original_y = y
         if group is not None:
             group.append(self)
     
-    def draw(self, surface):
-        pygame.draw.circle(surface, BLACK, self.rect.center, 10, 2)
-        if self.selected:
-            pygame.draw.circle(surface, BLACK, self.rect.center, 6)
+    def update_position(self, x, y, radius=10):
+        """Update radio button position when screen is resized"""
+        self.rect = pygame.Rect(x - radius, y - radius, radius * 2, radius * 2)
+    
+    def draw(self, surface, current_font=None):
+        if current_font is None:
+            current_font = small_font
+            
+        # Draw outer circle
+        radius = self.rect.width // 2
+        pygame.draw.circle(surface, BLACK, self.rect.center, radius, 2)
         
-        text_surf = small_font.render(self.text, True, BLACK)
-        text_rect = text_surf.get_rect(midleft=(self.rect.right + 10, self.rect.centery))
+        # Draw filled circle if selected
+        if self.selected:
+            pygame.draw.circle(surface, BLACK, self.rect.center, radius * 0.6)
+        
+        # Draw text label
+        text_surf = current_font.render(self.text, True, BLACK)
+        text_rect = text_surf.get_rect(midleft=(self.rect.right + radius, self.rect.centery))
         surface.blit(text_surf, text_rect)
     
     def is_clicked(self, pos, event):
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            if (pos[0] - self.rect.centerx) ** 2 + (pos[1] - self.rect.centery) ** 2 <= 100:
+            radius = self.rect.width // 2
+            # Check if click is within the circle
+            if (pos[0] - self.rect.centerx) ** 2 + (pos[1] - self.rect.centery) ** 2 <= radius * radius:
                 return True
         return False
     
@@ -116,9 +171,9 @@ class RadioButton:
 class TicTacToeGUI:
     def __init__(self):
         self.game = TicTacToe()
-        self.rl_agent = QAgent(player=1)  # RL agent plays X (changed from O to X)
-        self.random_agent = RandomAgent(player=-1)  # Random agent plays O (changed from X to O)
-        self.minimax_agent = MiniMaxAgent(player=-1)  # MiniMax agent plays O (changed from X to O)
+        self.rl_agent = QAgent(player=1)  # RL agent plays X
+        self.random_agent = RandomAgent(player=-1)  # Random agent plays O
+        self.minimax_agent = MiniMaxAgent(player=-1)  # MiniMax agent plays O
         
         # Try to load a pre-trained agent
         self.rl_agent.load()
@@ -131,10 +186,13 @@ class TicTacToeGUI:
         self.training_history = []
         self.win_rate_history = []
         
-        self.human_player = -1  # Human plays O by default (changed from X to O)
+        self.human_player = -1  # Human plays O by default
         self.current_player = 1  # X starts (RL agent goes first)
         self.game_over = False
         self.result_message = ""
+        
+        # Current layout (will be updated when window is resized)
+        self.current_layout = layout
         
         # Create UI elements
         self.create_buttons()
@@ -144,109 +202,261 @@ class TicTacToeGUI:
         self.player_group = []
         
         # Create radio buttons for opponent selection
-        self.rb_random = RadioButton(TRAIN_GRAPH_X, TRAIN_GRAPH_Y + TRAIN_HISTORY_HEIGHT + 20, 
-                                    "Random Opponent", self.opponent_group, True)
-        self.rb_minimax = RadioButton(TRAIN_GRAPH_X, TRAIN_GRAPH_Y + TRAIN_HISTORY_HEIGHT + 45, 
-                                     "MiniMax Opponent", self.opponent_group)
+        self.rb_random = RadioButton(
+            self.current_layout['controls_x'], 
+            self.current_layout['controls_y'] + 30, 
+            "Random Opponent", 
+            self.opponent_group, 
+            True
+        )
+        
+        self.rb_minimax = RadioButton(
+            self.current_layout['controls_x'], 
+            self.current_layout['controls_y'] + 60, 
+            "MiniMax Opponent", 
+            self.opponent_group
+        )
         
         # Create radio buttons for player selection
-        self.rb_play_o = RadioButton(TRAIN_GRAPH_X, TRAIN_GRAPH_Y + TRAIN_HISTORY_HEIGHT + 90, 
-                                    "Play as O", self.player_group, True)
-        self.rb_play_x = RadioButton(TRAIN_GRAPH_X, TRAIN_GRAPH_Y + TRAIN_HISTORY_HEIGHT + 115, 
-                                    "Play as X", self.player_group, False)
+        self.rb_play_o = RadioButton(
+            self.current_layout['controls_x'], 
+            self.current_layout['controls_y'] + 120, 
+            "Play as O", 
+            self.player_group, 
+            True
+        )
+        
+        self.rb_play_x = RadioButton(
+            self.current_layout['controls_x'], 
+            self.current_layout['controls_y'] + 150, 
+            "Play as X", 
+            self.player_group, 
+            False
+        )
     
     def create_buttons(self):
+        """Create buttons with positions based on current layout"""
+        l = self.current_layout
+        
         self.buttons = {
-            "train": Button(BOARD_X, BOARD_Y + BOARD_SIZE + 30, BUTTON_WIDTH, BUTTON_HEIGHT, 
-                           "Train Agent", GREEN, DARK_GREEN),
-            "reset": Button(BOARD_X + BUTTON_WIDTH + BUTTON_MARGIN, BOARD_Y + BOARD_SIZE + 30, 
-                           BUTTON_WIDTH, BUTTON_HEIGHT, "Reset Game", BLUE),
-            "save": Button(TRAIN_GRAPH_X, TRAIN_GRAPH_Y + TRAIN_HISTORY_HEIGHT + 160, 
-                          BUTTON_WIDTH, BUTTON_HEIGHT, "Save Agent", GREEN, DARK_GREEN),
-            "load": Button(TRAIN_GRAPH_X + BUTTON_WIDTH + BUTTON_MARGIN, TRAIN_GRAPH_Y + TRAIN_HISTORY_HEIGHT + 160, 
-                          BUTTON_WIDTH, BUTTON_HEIGHT, "Load Agent", BLUE)
+            "train": Button(
+                l['board_x'], 
+                l['board_y'] + l['board_size'] + l['button_margin'], 
+                l['button_width'], 
+                l['button_height'], 
+                "Train Agent", 
+                GREEN, 
+                DARK_GREEN
+            ),
+            "reset": Button(
+                l['board_x'] + l['button_width'] + l['button_margin'], 
+                l['board_y'] + l['board_size'] + l['button_margin'], 
+                l['button_width'], 
+                l['button_height'], 
+                "Reset Game", 
+                BLUE
+            ),
+            "save": Button(
+                l['controls_x'], 
+                l['controls_y'] + 200, 
+                l['button_width'], 
+                l['button_height'], 
+                "Save Agent", 
+                GREEN, 
+                DARK_GREEN
+            ),
+            "load": Button(
+                l['controls_x'] + l['button_width'] + l['button_margin'], 
+                l['controls_y'] + 200, 
+                l['button_width'], 
+                l['button_height'], 
+                "Load Agent", 
+                BLUE
+            )
         }
+        
+    def update_layout(self, width, height):
+        """Update the layout when the window is resized"""
+        # Calculate new layout based on window dimensions
+        self.current_layout = calculate_layout(width, height)
+        l = self.current_layout
+        
+        # Update button positions and sizes
+        self.buttons["train"].update_position(
+            l['board_x'], 
+            l['board_y'] + l['board_size'] + l['button_margin'], 
+            l['button_width'], 
+            l['button_height']
+        )
+        
+        self.buttons["reset"].update_position(
+            l['board_x'] + l['button_width'] + l['button_margin'], 
+            l['board_y'] + l['board_size'] + l['button_margin'], 
+            l['button_width'], 
+            l['button_height']
+        )
+        
+        self.buttons["save"].update_position(
+            l['controls_x'], 
+            l['controls_y'] + 200, 
+            l['button_width'], 
+            l['button_height']
+        )
+        
+        self.buttons["load"].update_position(
+            l['controls_x'] + l['button_width'] + l['button_margin'], 
+            l['controls_y'] + 200, 
+            l['button_width'], 
+            l['button_height']
+        )
+        
+        # Update radio button positions
+        radio_btn_radius = int(min(width, height) * 0.012)
+        
+        self.rb_random.update_position(
+            l['controls_x'] + radio_btn_radius, 
+            l['controls_y'] + 30, 
+            radio_btn_radius
+        )
+        
+        self.rb_minimax.update_position(
+            l['controls_x'] + radio_btn_radius, 
+            l['controls_y'] + 60, 
+            radio_btn_radius
+        )
+        
+        self.rb_play_o.update_position(
+            l['controls_x'] + radio_btn_radius, 
+            l['controls_y'] + 120, 
+            radio_btn_radius
+        )
+        
+        self.rb_play_x.update_position(
+            l['controls_x'] + radio_btn_radius, 
+            l['controls_y'] + 150, 
+            radio_btn_radius
+        )
+        
+        # Update fonts
+        global font, small_font, large_font, title_font
+        font = pygame.font.SysFont("Arial", l['normal_font_size'])
+        small_font = pygame.font.SysFont("Arial", l['small_font_size'])
+        large_font = pygame.font.SysFont("Arial", l['large_font_size'])
+        title_font = pygame.font.SysFont("Arial", l['title_font_size'], bold=True)
     
     def draw_board(self):
+        l = self.current_layout
+        board_x = l['board_x']
+        board_y = l['board_y']
+        board_size = l['board_size']
+        cell_size = l['cell_size']
+        
         # Draw the board background
-        pygame.draw.rect(screen, WHITE, (BOARD_X, BOARD_Y, BOARD_SIZE, BOARD_SIZE))
-        pygame.draw.rect(screen, BLACK, (BOARD_X, BOARD_Y, BOARD_SIZE, BOARD_SIZE), 3)
+        pygame.draw.rect(screen, WHITE, (board_x, board_y, board_size, board_size))
+        line_thickness = max(3, int(board_size * 0.008))
+        pygame.draw.rect(screen, BLACK, (board_x, board_y, board_size, board_size), line_thickness)
         
         # Draw grid lines
         for i in range(1, 3):
             # Vertical lines
             pygame.draw.line(screen, BLACK, 
-                            (BOARD_X + i * CELL_SIZE, BOARD_Y), 
-                            (BOARD_X + i * CELL_SIZE, BOARD_Y + BOARD_SIZE), 
-                            3)
+                            (board_x + i * cell_size, board_y), 
+                            (board_x + i * cell_size, board_y + board_size), 
+                            line_thickness)
             # Horizontal lines
             pygame.draw.line(screen, BLACK, 
-                            (BOARD_X, BOARD_Y + i * CELL_SIZE), 
-                            (BOARD_X + BOARD_SIZE, BOARD_Y + i * CELL_SIZE), 
-                            3)
+                            (board_x, board_y + i * cell_size), 
+                            (board_x + board_size, board_y + i * cell_size), 
+                            line_thickness)
         
         # Draw X's and O's
         for i in range(3):
             for j in range(3):
                 cell_value = self.game.board[i, j]
                 if cell_value == 1:  # X
-                    self.draw_x(BOARD_X + j * CELL_SIZE, BOARD_Y + i * CELL_SIZE)
+                    self.draw_x(board_x + j * cell_size, board_y + i * cell_size)
                 elif cell_value == -1:  # O
-                    self.draw_o(BOARD_X + j * CELL_SIZE, BOARD_Y + i * CELL_SIZE)
+                    self.draw_o(board_x + j * cell_size, board_y + i * cell_size)
     
     def draw_x(self, x, y):
+        l = self.current_layout
+        cell_size = l['cell_size']
+        
+        # Scale margin and line thickness with cell size
+        margin = int(cell_size * 0.15)
+        thickness = max(4, int(cell_size * 0.05))
+        
         # Draw X
-        margin = 20
-        pygame.draw.line(screen, RED, (x + margin, y + margin), 
-                        (x + CELL_SIZE - margin, y + CELL_SIZE - margin), 8)
-        pygame.draw.line(screen, RED, (x + CELL_SIZE - margin, y + margin), 
-                        (x + margin, y + CELL_SIZE - margin), 8)
+        pygame.draw.line(screen, RED, 
+                         (x + margin, y + margin), 
+                         (x + cell_size - margin, y + cell_size - margin), 
+                         thickness)
+        pygame.draw.line(screen, RED, 
+                         (x + cell_size - margin, y + margin), 
+                         (x + margin, y + cell_size - margin), 
+                         thickness)
     
     def draw_o(self, x, y):
+        l = self.current_layout
+        cell_size = l['cell_size']
+        
+        # Scale margin and thickness with cell size
+        margin = int(cell_size * 0.15)
+        thickness = max(4, int(cell_size * 0.05))
+        
         # Draw O
-        margin = 20
-        center = (x + CELL_SIZE // 2, y + CELL_SIZE // 2)
-        radius = CELL_SIZE // 2 - margin
-        pygame.draw.circle(screen, BLUE, center, radius, 8)
+        center = (x + cell_size // 2, y + cell_size // 2)
+        radius = cell_size // 2 - margin
+        pygame.draw.circle(screen, BLUE, center, radius, thickness)
     
     def draw_training_stats(self):
+        l = self.current_layout
+        train_x = l['train_graph_x']
+        train_y = l['train_graph_y']
+        train_width = l['train_history_width']
+        train_height = l['train_history_height']
+        padding = int(train_width * 0.025)
+        
         # Draw training stats background
         pygame.draw.rect(screen, LIGHT_BLUE, 
-                        (TRAIN_GRAPH_X, TRAIN_GRAPH_Y, TRAIN_HISTORY_WIDTH, TRAIN_HISTORY_HEIGHT))
+                        (train_x, train_y, train_width, train_height))
         pygame.draw.rect(screen, BLACK, 
-                        (TRAIN_GRAPH_X, TRAIN_GRAPH_Y, TRAIN_HISTORY_WIDTH, TRAIN_HISTORY_HEIGHT), 2)
+                        (train_x, train_y, train_width, train_height), 2)
         
         # Draw title
         title = small_font.render("Training Progress", True, BLACK)
-        screen.blit(title, (TRAIN_GRAPH_X + 10, TRAIN_GRAPH_Y + 10))
+        screen.blit(title, (train_x + padding, train_y + padding))
+        
+        # Line height based on font size
+        line_height = l['small_font_size'] * 1.5
         
         # Draw win rate
         win_rate = self.rl_agent.get_win_rate()
         win_text = small_font.render(f"Win Rate: {win_rate:.2f}", True, BLACK)
-        screen.blit(win_text, (TRAIN_GRAPH_X + 10, TRAIN_GRAPH_Y + 35))
+        screen.blit(win_text, (train_x + padding, train_y + padding + line_height))
         
         # Draw episode count
         episode_text = small_font.render(f"Episodes: {self.episode_count}/{self.target_episodes}", True, BLACK)
-        screen.blit(episode_text, (TRAIN_GRAPH_X + 10, TRAIN_GRAPH_Y + 60))
+        screen.blit(episode_text, (train_x + padding, train_y + padding + line_height * 2))
         
         # Draw exploration rate
         explore_text = small_font.render(f"Exploration Rate: {self.rl_agent.exploration_rate:.4f}", True, BLACK)
-        screen.blit(explore_text, (TRAIN_GRAPH_X + 10, TRAIN_GRAPH_Y + 85))
+        screen.blit(explore_text, (train_x + padding, train_y + padding + line_height * 3))
         
         # Draw win/loss/draw counts
         stats = self.rl_agent.training_history
         stats_text = small_font.render(
             f"Wins: {stats['wins']}  Losses: {stats['losses']}  Draws: {stats['draws']}", 
             True, BLACK)
-        screen.blit(stats_text, (TRAIN_GRAPH_X + 10, TRAIN_GRAPH_Y + 110))
+        screen.blit(stats_text, (train_x + padding, train_y + padding + line_height * 4))
         
         # Draw win rate graph
         if len(self.win_rate_history) > 1:
-            graph_margin = 40
-            graph_width = TRAIN_HISTORY_WIDTH - 20
-            graph_height = 70
-            graph_x = TRAIN_GRAPH_X + 10
-            graph_y = TRAIN_GRAPH_Y + 130
+            graph_margin = padding * 2
+            graph_width = train_width - graph_margin * 2
+            graph_height = train_height * 0.35
+            graph_x = train_x + graph_margin
+            graph_y = train_y + train_height * 0.6
             
             # Draw graph axes
             pygame.draw.line(screen, BLACK, 
@@ -268,12 +478,15 @@ class TicTacToeGUI:
                 pygame.draw.lines(screen, DARK_GREEN, False, points, 2)
     
     def draw_ui(self):
+        # Get current window size
+        width, height = screen.get_size()
+        
         # Clear screen
         screen.fill(GRAY)
         
         # Draw title
         title_text = title_font.render("Tic Tac Toe RL", True, BLACK)
-        screen.blit(title_text, (SCREEN_WIDTH // 2 - title_text.get_width() // 2, 20))
+        screen.blit(title_text, (width // 2 - title_text.get_width() // 2, height * 0.03))
         
         # Draw subtitle based on state
         if self.training:
@@ -285,7 +498,7 @@ class TicTacToeGUI:
             else:
                 player = "X" if self.current_player == 1 else "O"
                 subtitle = font.render(f"Current player: {player}", True, BLACK)
-        screen.blit(subtitle, (SCREEN_WIDTH // 2 - subtitle.get_width() // 2, 80))
+        screen.blit(subtitle, (width // 2 - subtitle.get_width() // 2, height * 0.08))
         
         # Draw board
         self.draw_board()
@@ -295,20 +508,22 @@ class TicTacToeGUI:
         
         # Draw buttons
         for button in self.buttons.values():
-            button.draw(screen)
+            button.draw(screen, font)
+        
+        # Draw section titles
+        l = self.current_layout
+        
+        opponent_title = font.render("Opponent Selection:", True, BLACK)
+        screen.blit(opponent_title, (l['controls_x'], l['controls_y']))
+        
+        player_title = font.render("Player Selection:", True, BLACK)
+        screen.blit(player_title, (l['controls_x'], l['controls_y'] + 90))
         
         # Draw radio buttons
         for rb in self.opponent_group:
-            rb.draw(screen)
+            rb.draw(screen, small_font)
         for rb in self.player_group:
-            rb.draw(screen)
-        
-        # Draw section titles
-        opponent_title = font.render("Opponent Selection:", True, BLACK)
-        screen.blit(opponent_title, (TRAIN_GRAPH_X, TRAIN_GRAPH_Y + TRAIN_HISTORY_HEIGHT))
-        
-        player_title = font.render("Player Selection:", True, BLACK)
-        screen.blit(player_title, (TRAIN_GRAPH_X, TRAIN_GRAPH_Y + TRAIN_HISTORY_HEIGHT + 70))
+            rb.draw(screen, small_font)
         
         # Update the screen
         pygame.display.flip()
@@ -317,22 +532,30 @@ class TicTacToeGUI:
         if self.training:
             return
         
+        l = self.current_layout
+        board_x = l['board_x']
+        board_y = l['board_y']
+        board_size = l['board_size']
+        cell_size = l['cell_size']
+        
         # Check if clicked on board
-        if (BOARD_X <= pos[0] <= BOARD_X + BOARD_SIZE and 
-            BOARD_Y <= pos[1] <= BOARD_Y + BOARD_SIZE and 
+        if (board_x <= pos[0] <= board_x + board_size and 
+            board_y <= pos[1] <= board_y + board_size and 
             not self.game_over):
             
             # Convert click position to board coordinates
-            j = (pos[0] - BOARD_X) // CELL_SIZE
-            i = (pos[1] - BOARD_Y) // CELL_SIZE
+            j = int((pos[0] - board_x) // cell_size)
+            i = int((pos[1] - board_y) // cell_size)
             
-            # Check if it's human's turn and the cell is empty
-            if self.current_player == self.human_player and self.game.board[i, j] == 0:
-                self.make_move((i, j))
-                
-                # If game not over, let agent make a move
-                if not self.game_over and self.current_player != self.human_player:
-                    self.make_agent_move()
+            # Ensure coordinates are within bounds
+            if 0 <= i < 3 and 0 <= j < 3:
+                # Check if it's human's turn and the cell is empty
+                if self.current_player == self.human_player and self.game.board[i, j] == 0:
+                    self.make_move((i, j))
+                    
+                    # If game not over, let agent make a move
+                    if not self.game_over and self.current_player != self.human_player:
+                        self.make_agent_move()
     
     def make_move(self, position):
         if self.game_over:
@@ -363,9 +586,11 @@ class TicTacToeGUI:
         pygame.display.flip()
         time.sleep(0.3)  # 300ms delay before agent makes its move
         
-        # Get the agent's action with look-ahead for RL agent
-        look_ahead = True if agent == self.rl_agent else False
-        action = agent.choose_action(self.game.board, training=False, look_ahead=look_ahead)
+        # Get the agent's action with look-ahead for RL agent only
+        if agent == self.rl_agent:
+            action = agent.choose_action(self.game.board, training=False, look_ahead=True)
+        else:
+            action = agent.choose_action(self.game.board, training=False)
         
         if action is not None:
             # Make the move
@@ -377,11 +602,8 @@ class TicTacToeGUI:
         self.game_over = False
         self.result_message = ""
         
-        # Always make the RL agent go first when playing against a human
-        # This gives the agent an unfair advantage
-        if self.rl_agent.player == 1:  # RL agent is X
-            self.make_agent_move()
-        elif self.current_player != self.human_player:
+        # If it's the AI's turn, make a move
+        if self.current_player != self.human_player:
             self.make_agent_move()
     
     def train_rl_agent(self):
@@ -546,11 +768,18 @@ class TicTacToeGUI:
     
     def run(self):
         running = True
+        clock = pygame.time.Clock()
+        
         while running:
             # Process events
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
+                
+                # Handle window resize events
+                elif event.type == pygame.VIDEORESIZE:
+                    # Update screen size and recalculate layout
+                    self.update_layout(event.w, event.h)
                 
                 # Get mouse position
                 mouse_pos = pygame.mouse.get_pos()
@@ -587,12 +816,18 @@ class TicTacToeGUI:
                         if rb.is_clicked(mouse_pos, event):
                             rb.select()
                             self.update_player()
+                
+                # Handle key presses
+                elif event.type == pygame.KEYDOWN:
+                    # Press F to toggle fullscreen
+                    if event.key == pygame.K_f:
+                        pygame.display.toggle_fullscreen()
             
             # Draw the UI
             self.draw_ui()
             
             # Cap the frame rate
-            pygame.time.Clock().tick(60)
+            clock.tick(60)
         
         pygame.quit()
 

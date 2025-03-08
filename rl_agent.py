@@ -127,6 +127,11 @@ class QAgent:
     def learn(self, state, action, reward, next_state, done):
         """Update Q-values using Q-learning algorithm"""
         state_key = self.board_to_state(state)
+        
+        # Skip update if action is None (this happens when learning from opponent winning)
+        if action is None:
+            return
+            
         action_idx = self.position_to_action(action)
         
         if done:
