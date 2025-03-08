@@ -7,6 +7,7 @@ class TicTacToe:
         self.winner = None
         self.game_over = False
         self.move_history = []
+        print(f"[GAME] New tic-tac-toe game initialized")
     
     def reset(self):
         self.board = np.zeros((3, 3), dtype=int)
@@ -14,6 +15,7 @@ class TicTacToe:
         self.winner = None
         self.game_over = False
         self.move_history = []
+        print(f"[GAME] Game reset")
         return self.get_state()
     
     def get_state(self):
@@ -26,14 +28,19 @@ class TicTacToe:
     
     def make_move(self, position):
         if self.game_over:
+            print(f"[GAME] Attempted move on finished game")
             return self.get_state(), 0, True
         
         i, j = position
+        player_symbol = "X" if self.current_player == 1 else "O"
+        
         if self.board[i, j] != 0:
+            print(f"[GAME] Invalid move by {player_symbol} at position ({i},{j})")
             return self.get_state(), -10, False  # Invalid move penalty
         
         self.board[i, j] = self.current_player
         self.move_history.append((i, j))
+        print(f"[GAME] Player {player_symbol} placed at position ({i},{j})")
         
         # Check for win
         reward = 0
@@ -41,10 +48,12 @@ class TicTacToe:
             self.winner = self.current_player
             self.game_over = True
             reward = 1 if self.current_player == 1 else -1
+            print(f"[GAME] Player {player_symbol} wins! Reward: {reward}")
         # Check for draw
         elif len(self.get_valid_moves()) == 0:
             self.game_over = True
             reward = 0.5  # Small reward for draw
+            print(f"[GAME] Game ended in a draw. Reward: {reward}")
         
         # Switch player
         self.current_player *= -1

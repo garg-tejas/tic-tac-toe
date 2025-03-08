@@ -54,11 +54,14 @@ class QAgent:
         valid_actions = self.get_valid_actions(board)
         
         if not valid_actions:
+            print(f"[AGENT] No valid actions available")
             return None
         
         # Explore: random action
         if training and np.random.random() < self.exploration_rate:
             action = random.choice(valid_actions)
+            i, j = self.action_to_position(action)
+            print(f"[AGENT] Exploring: randomly chose position ({i},{j})")
         # Exploit: best known action
         else:
             # Filter Q-values for valid actions only
@@ -69,6 +72,7 @@ class QAgent:
             
             # If look-ahead is enabled and not in training mode, evaluate next states
             if look_ahead and not training:
+                print(f"[AGENT] Using look-ahead to find optimal move")
                 # Look ahead to find potential winning moves or block opponent wins
                 for action in valid_actions:
                     i, j = self.action_to_position(action)
@@ -78,6 +82,7 @@ class QAgent:
                     
                     # If this move leads to a win, choose it immediately
                     if self._check_win(board_copy, self.player):
+                        print(f"[AGENT] Found winning move at ({i},{j})")
                         return (i, j)
                     
                     # Check if opponent has a winning move to block
@@ -91,6 +96,7 @@ class QAgent:
                         
                         if self._check_win(board_copy2, -self.player):
                             # Opponent would win here, block it
+                            print(f"[AGENT] Blocking opponent's winning move at ({opp_i},{opp_j})")
                             masked_q_values[opp_action] += 5.0  # Boost blocking moves
                 
                 # Give corner and center positions a slight advantage
@@ -102,11 +108,17 @@ class QAgent:
                 # If center is open in the beginning, prioritize it
                 if len(valid_actions) > 7 and 4 in valid_actions:  # Beginning of game
                     masked_q_values[4] += 0.5  # Boost center position at start
+                    print(f"[AGENT] Prioritizing center position")
             
             # Choose the best action (with random tie-breaking)
             max_q = np.max(masked_q_values)
             best_actions = [a for a in valid_actions if masked_q_values[a] == max_q]
             action = random.choice(best_actions)
+            i, j = self.action_to_position(action)
+            
+            # Only print in non-training mode or occasionally during training
+            if not training or (training and np.random.random() < 0.01):
+                print(f"[AGENT] Exploiting: chose position ({i},{j}) with Q-value {masked_q_values[action]:.4f}")
         
         return self.action_to_position(action)
     
@@ -135,28 +147,41 @@ class QAgent:
         
         # Skip update if action is None (this happens when learning from opponent winning)
         if action is None:
+            print(f"[AGENT] Skipping learning step - no action provided")
             return
             
         action_idx = self.position_to_action(action)
+        i, j = action
         
         if done:
             # Terminal state
             target = reward
+            print(f"[AGENT] Terminal state reached with reward {reward:.2f}")
         else:
             next_state_key = self.board_to_state(next_state)
             # Get best Q-value for next state
             next_q_value = np.max(self.q_table[next_state_key])
             target = reward + self.discount_factor * next_q_value
+            
+            # Only log occasionally during training to avoid excessive output
+            if np.random.random() < 0.01:
+                print(f"[AGENT] Calculated target Q-value: {target:.4f} = {reward:.2f} + {self.discount_factor} * {next_q_value:.4f}")
         
         # Update Q-value for current state-action pair
         old_value = self.q_table[state_key][action_idx]
         self.q_table[state_key][action_idx] += self.learning_rate * (target - old_value)
+        
+        # Log Q-value updates occasionally
+        if np.random.random() < 0.01:
+            print(f"[AGENT] Updated Q-value for position ({i},{j}): {old_value:.4f} -> {self.q_table[state_key][action_idx]:.4f}")
     
     def update_training_history(self, reward):
         """Update training statistics"""
         self.training_history['rewards'].append(reward)
         if reward == 1:  # Win
             self.training_history['wins'] += 1
+            if self.training_history['wins'] % 100 == 0:  # Log every 100 wins
+                print(f"[AGENT] Training milestone: {self.training_history['wins']} wins")
         elif reward == -1:  # Loss
             self.training_history['losses'] += 1
         elif reward == 0.5:  # Draw
@@ -175,6 +200,8 @@ class QAgent:
         }
         with open(filepath, 'wb') as f:
             pickle.dump(data, f)
+        print(f"[AGENT] Model saved to {filepath}")
+        print(f"[AGENT] Training stats: {self.training_history['wins']} wins, {self.training_history['losses']} losses, {self.training_history['draws']} draws")
     
     def load(self, filepath='q_agent.pkl'):
         """Load the Q-table and training history from a file"""
@@ -192,12 +219,21 @@ class QAgent:
             self.learning_rate = data['learning_rate']
             self.discount_factor = data['discount_factor']
             self.player = data['player']
+            print(f"[AGENT] Model loaded from {filepath}")
+            print(f"[AGENT] Loaded model stats: {self.training_history['wins']} wins, {self.training_history['losses']} losses, {self.training_history['draws']} draws")
+            print(f"[AGENT] Current exploration rate: {self.exploration_rate:.4f}")
             return True
+        print(f"[AGENT] Failed to load model: {filepath} not found")
         return False
     
     def decrease_exploration(self, factor=0.995, min_rate=0.01):
         """Decrease exploration rate over time"""
+        old_rate = self.exploration_rate
         self.exploration_rate = max(self.exploration_rate * factor, min_rate)
+        
+        # Log only when there's a notable change
+        if abs(old_rate - self.exploration_rate) > 0.01:
+            print(f"[AGENT] Exploration rate decreased: {old_rate:.4f} -> {self.exploration_rate:.4f}")
         
     def get_win_rate(self):
         """Calculate win rate from training history"""

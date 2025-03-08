@@ -2,6 +2,7 @@
 import sys
 import argparse
 import os
+import time
 import numpy as np
 import matplotlib.pyplot as plt
 from game import TicTacToe
@@ -79,21 +80,34 @@ def visualize_metrics(metrics):
 
 def train_and_save(agent_type, opponent_type, num_episodes, save_path=None):
     """Train the agent and save the model"""
+    print("[MAIN] Starting training session")
     env = TicTacToe()
     
     # Create agent
     agent = create_agent(agent_type)
+    print(f"[MAIN] Created {agent_type} agent with exploration rate {agent.exploration_rate:.4f}")
     
     # Create opponent or use self-play
     self_play = opponent_type == 'self'
     if self_play:
         opponent = None
+        print("[MAIN] Using self-play training mode")
     else:
         opponent = create_opponent(opponent_type)
+        print(f"[MAIN] Using {opponent_type} opponent for training")
     
     # Train the agent
-    print(f"Training {agent_type} agent against {opponent_type} for {num_episodes} episodes...")
+    print(f"[MAIN] Training {agent_type} agent against {opponent_type} for {num_episodes} episodes...")
+    start_time = time.time()
     agent, metrics = train_agent(env, agent, opponent, num_episodes=num_episodes, self_play=self_play)
+    training_time = time.time() - start_time
+    print(f"[MAIN] Training completed in {training_time:.2f} seconds ({training_time/num_episodes:.4f} sec/episode)")
+    
+    # Print final training stats
+    print(f"[MAIN] Final training stats:")
+    print(f"[MAIN] - Win rate: {metrics['win_rates'][-1]:.4f}")
+    print(f"[MAIN] - Average reward: {np.mean(metrics['rewards'][-1000:]):.4f}")
+    print(f"[MAIN] - Final exploration rate: {agent.exploration_rate:.4f}")
     
     # Save the agent
     if save_path is None:
@@ -103,7 +117,7 @@ def train_and_save(agent_type, opponent_type, num_episodes, save_path=None):
             save_path = 'deep_q_agent'
     
     agent.save(save_path)
-    print(f"Agent saved to {save_path}")
+    print(f"[MAIN] Agent saved to {save_path}")
     
     return agent, metrics
 
