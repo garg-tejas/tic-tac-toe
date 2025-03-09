@@ -3,11 +3,25 @@ import pickle
 import os
 import random
 from collections import defaultdict
+import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow.keras.models import Sequential, load_model, save_model
 from tensorflow.keras.layers import Dense, Input
 from tensorflow.keras.optimizers import Adam
-import matplotlib.pyplot as plt
+from tensorflow.keras import mixed_precision
+mixed_precision.set_global_policy('mixed_float16')
+
+gpus = tf.config.list_physical_devices('GPU')
+if gpus:
+    print(f"GPU detected: {gpus}")
+    try:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+    except RuntimeError as e:
+        print(e)
+else:
+    print("No GPU detected - using CPU")
+    
 
 class QAgent:
     def __init__(self, player=-1, exploration_rate=0.2, learning_rate=0.2, discount_factor=0.9):
@@ -350,7 +364,7 @@ class MiniMaxAgent:
 
 
 class DeepQAgent:
-    def __init__(self, player=-1, exploration_rate=0.3, learning_rate=0.001, discount_factor=0.95, batch_size=64, memory_size=10000):
+    def __init__(self, player=-1, exploration_rate=0.3, learning_rate=0.001, discount_factor=0.95, batch_size=256, memory_size=100000):
         self.player = player  # -1 for O, 1 for X
         self.exploration_rate = exploration_rate
         self.learning_rate = learning_rate
@@ -372,14 +386,13 @@ class DeepQAgent:
         self.last_action = None
         
     def _build_model(self):
-        """Build a neural network model for deep Q-learning"""
-        model = Sequential()
-        # Input layer represents the flattened game board (9 positions)
-        model.add(Input(shape=(18,)))  # 9 positions * 2 (one-hot encoding for X and O)
-        model.add(Dense(128, activation='relu'))
-        model.add(Dense(64, activation='relu'))
-        model.add(Dense(32, activation='relu'))
-        model.add(Dense(9, activation='linear'))  # Output layer - Q-values for each position
+        model = Sequential([
+            Input(shape=(18,)),
+            Dense(256, activation='relu'),
+            Dense(128, activation='relu'),
+            Dense(64, activation='relu'),
+            Dense(9, activation='linear', dtype='float32')  # Force output layer to float32
+        ])
         model.compile(loss='mse', optimizer=Adam(learning_rate=self.learning_rate))
         return model
     
@@ -412,38 +425,49 @@ class DeepQAgent:
             self.memory.append((state, action_idx, reward, next_state, done))
     
     def replay(self, batch_size=None):
-        """Train the model by replaying experiences"""
         if batch_size is None:
             batch_size = self.batch_size
-            
+
         if len(self.memory) < batch_size:
-            return 0  # Not enough experiences
-        
-        # Sample random batch from memory
+            return 0
+
         minibatch = random.sample(self.memory, batch_size)
-        loss = 0
-        
-        for state, action_idx, reward, next_state, done in minibatch:
-            state_input = self.state_to_input(state)
-            next_state_input = self.state_to_input(next_state)
-            
-            target = self.model.predict(state_input, verbose=0)[0]
-            
+
+        # Extract batch components
+        states = [exp[0] for exp in minibatch]
+        actions = [exp[1] for exp in minibatch]
+        rewards = [exp[2] for exp in minibatch]
+        next_states = [exp[3] for exp in minibatch]
+        dones = [exp[4] for exp in minibatch]
+
+        # Convert to batched input arrays
+        state_inputs = np.array([self.state_to_input(s).flatten() for s in states])
+        next_state_inputs = np.array([self.state_to_input(ns).flatten() for ns in next_states])
+
+        # Batch predictions for efficiency
+        current_q_values = self.model.predict(state_inputs, verbose=0)
+        next_q_online = self.model.predict(next_state_inputs, verbose=0)
+        next_q_target = self.target_model.predict(next_state_inputs, verbose=0)
+
+        # Compute targets using Double DQN
+        targets = current_q_values.copy()
+        for i in range(batch_size):
+            action_idx = actions[i]
+            reward = rewards[i]
+            done = dones[i]
+
             if done:
-                target[action_idx] = reward
+                targets[i][action_idx] = reward
             else:
-                # Double DQN: Select action using online network, evaluate with target network
-                next_action = np.argmax(self.model.predict(next_state_input, verbose=0)[0])
-                future_reward = self.target_model.predict(next_state_input, verbose=0)[0][next_action]
-                target[action_idx] = reward + self.discount_factor * future_reward
-            
-            # Train the model
-            history = self.model.fit(state_input, np.array([target]), epochs=1, verbose=0)
-            loss += history.history['loss'][0]
+                next_action = np.argmax(next_q_online[i])
+                targets[i][action_idx] = reward + self.discount_factor * next_q_target[i][next_action]
+
+        # Single batch training for GPU efficiency
+        history = self.model.fit(state_inputs, targets, batch_size=batch_size, verbose=0)
+        loss = history.history['loss'][0]
         
-        # Record loss
-        self.training_history['loss'].append(loss / batch_size)
-        return loss / batch_size
+        self.training_history['loss'].append(loss)
+        return loss
     
     def choose_action(self, board, training=True, look_ahead=True):
         """Choose an action using epsilon-greedy policy with look-ahead"""

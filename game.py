@@ -15,7 +15,7 @@ class TicTacToe:
         self.winner = None
         self.game_over = False
         self.move_history = []
-        print(f"[GAME] Game reset")
+        # print(f"[GAME] Game reset")
         return self.get_state()
     
     def get_state(self):
@@ -35,24 +35,24 @@ class TicTacToe:
         player_symbol = "X" if self.current_player == 1 else "O"
         
         if self.board[i, j] != 0:
-            print(f"[GAME] Invalid move by {player_symbol} at position ({i},{j})")
+            # print(f"[GAME] Invalid move by {player_symbol} at position ({i},{j})")
             return self.get_state(), -10, False  # Invalid move penalty
         
         self.board[i, j] = self.current_player
         self.move_history.append((i, j))
-        print(f"[GAME] Player {player_symbol} placed at position ({i},{j})")
+        # print(f"[GAME] Player {player_symbol} placed at position ({i},{j})")
         
         # Check for win
         reward = 0
         if self._check_win():
             self.winner = self.current_player
             self.game_over = True
-            reward = 1 if self.current_player == 1 else -1
+            reward = 1 if self.current_player == 1 else -5
             print(f"[GAME] Player {player_symbol} wins! Reward: {reward}")
         # Check for draw
         elif len(self.get_valid_moves()) == 0:
             self.game_over = True
-            reward = 0.5  # Small reward for draw
+            reward = -1  # Small reward for draw
             print(f"[GAME] Game ended in a draw. Reward: {reward}")
         
         # Switch player

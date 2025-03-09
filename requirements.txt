@@ -2,3 +2,4 @@ numpy
 pygame
 tensorflow[and-cuda]
 matplotlib
+nvidia-cudnn-cu11==8.6.0.163
