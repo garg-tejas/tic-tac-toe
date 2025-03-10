@@ -47,7 +47,7 @@ class TicTacToe:
         if self._check_win():
             self.winner = self.current_player
             self.game_over = True
-            reward = 3 if self.current_player == 1 else -5
+            reward = 1 if self.current_player == 1 else -5
             print(f"[GAME] Player {player_symbol} wins! Reward: {reward}")
         # Check for draw
         elif len(self.get_valid_moves()) == 0:
